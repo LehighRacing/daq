@@ -1,0 +1,111 @@
+1. Disabling hdmi to try to decrease interference with the wifi adapter
+
+2. blacklist wlan0 from /etc/connman/main.conf
+
+3. /etc/network/interfaces
+```
+auto wlan0
+iface wlan0 inet static
+    address 10.69.69.2
+    netmask 255.255.255.0
+    network 10.69.69.0
+    gateway 10.69.69.1
+```
+
+4. Hostapd
+/etc/default/hostapd
+```
+DAEMON_CONF="/etc/hostapd/hostapd.conf"
+```
+
+/etc/hostapd/hostapd.conf
+```
+debian@beaglebone:~$ cat /etc/hostapd/hostapd.conf
+# the interface used by the AP
+interface=wlan0
+# This is needed when using the cheapo usb wifi dongle
+driver=nl80211
+# g simply means 2.4GHz band
+hw_mode=g
+# the channel to use
+channel=7
+# limit the frequencies used to those allowed in the country
+ieee80211d=1
+# the country code
+country_code=US
+# 802.11n support
+ieee80211n=1
+
+# the name of the AP
+ssid2="Lawn Mower DAQ (TM)"
+# 1=wpa, 2=wep, 3=both
+auth_algs=1
+# WPA2 only
+wpa=2
+wpa_key_mgmt=WPA-PSK
+rsn_pairwise=CCMP
+wpa_passphrase=LaWnMoWiNgClUb
+```
+
+5. /etc/dnsmasq.d/wlan0
+```
+interface=wlan0
+dhcp-range=wlan0,10.69.69.100,10.69.69.200,2m
+listen-address=10.69.69.2
+dhcp-option=wlan0,3
+dhcp-option=wlan0,6
+```
+
+6. Bring up can0
+/etc/network/interfaces
+```
+auto can0
+iface can0 inet manual
+    pre-up ip link set $IFACE type can bitrate 500000 listen-only off
+    up /sbin/ifconfig $IFACE up
+    down /sbin/ifconfig $IFACE down
+```
+
+7. disable all the things
+```
+  142  sudo systemctl disable bonescript-autorun.service
+  143  sudo systemctl disable bonescript.socket
+  144  sudo systemctl disable cloud9.socket
+  184  sudo systemctl disable node-red.socket
+```
+
+8. Map pins
+
+/etc/config-pin.conf
+```
+# Specify pins to map to certain functions via the config-pin utility on boot.
+#
+# dcan0
+P9_19 can
+P9_20 can
+# dcan1
+P9_24 can
+P9_26 can
+# uart4
+P9_11 uart
+P9_13 uart
+```
+
+9. Setup pins to automap
+/etc/systemd/system/config-pin.service
+```
+[Unit]
+Description=Configure pins on startup for IO
+After=generic-board-startup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/config-pin -f /etc/config-pin.conf
+TimeoutSec=1
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+```
+
+$ sudo systemctl enable config-pin

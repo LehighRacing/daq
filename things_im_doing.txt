@@ -109,3 +109,15 @@ WantedBy=multi-user.target
 ```
 
 $ sudo systemctl enable config-pin
+
+10. Automount SD card
+```
+$ sudo apt-get install exfat-utils exfat-fuse
+$ sudo mkdir /mnt/sdcard
+```
+
+
+/etc/fstab add
+```
+/dev/mmcblk0p1	/mnt/sdcard	auto	auto,rw,async,user,nofail	0	0
+```

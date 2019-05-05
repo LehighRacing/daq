@@ -10,6 +10,7 @@ iface wlan0 inet static
     netmask 255.255.255.0
     network 10.69.69.0
     gateway 10.69.69.1
+    metric 100 # So this does not take over the default route
 ```
 
 4. Hostapd
@@ -112,7 +113,7 @@ $ sudo systemctl enable config-pin
 
 10. Automount SD card
 ```
-$ sudo apt-get install exfat-utils exfat-fuse
+$ sudo apt-get install -y exfat-utils exfat-fuse
 $ sudo mkdir /mnt/sdcard
 ```
 
@@ -120,4 +121,264 @@ $ sudo mkdir /mnt/sdcard
 /etc/fstab add
 ```
 /dev/mmcblk0p1	/mnt/sdcard	auto	auto,rw,async,user,nofail	0	0
+```
+
+11. Add I2C to the config-pin conf
+Add /etc/config-pin.conf
+```
+# i2c1
+P9_17 i2c
+P9_18 i2c
+```
+
+12. Extend config-pin timeout
+/etc/systemd/system/config-pin.service
+```
+...
+Timeout=2
+...
+```
+
+13. Compile a new DTBO file
+```
+$ cd /opt/source/bb.org-overlays
+$ git remote update
+$ git checkout fe349743947df3dee4f6872e339b317b6c5bda50
+```
+
+/opt/source/bb.org-overlays/src/arm/BB-I2C1-RTC-DS1307.dts
+```
+/*
+ * Copyright (C) 2018 Tim Small <tim@seoss.co.uk>
+ *
+ * Based on PB-I2C2-RTC-PCF8523.dts:
+ *
+ * Copyright (C) 2018 Robert Nelson <robertcnelson@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This overlay is for a Maxim (Dallas) DS1307 RTC connected via the
+ * BeagleBone's second I2C bus.
+ * https://www.maximintegrated.com/en/products/digital/real-time-clocks/DS1307.html
+ *
+ * It was built for the South Coast Science "DFE" air quality monitoring
+ * cape, but may be useful for any hardware which includes a DS1307
+ *
+ * https://www.southcoastscience.com/products/
+ *
+ * https://github.com/south-coast-science/scs_documentation/wiki/Digital-Front-End-%28DFE%29-for-BeagleBone-v1
+ */
+
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/board/am335x-bbw-bbb-base.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/am33xx.h>
+
+/ {
+	fragment@0 {
+		target-path="/";
+		__overlay__ {
+			aliases {
+				rtc0 = &extrtc;
+				/* The OMAP RTC implementation in the BBB is
+				 * buggy, so that it cannot be used as a
+				 * battery-backed RTS, so that it loses its
+				 * contents when power is removed from the
+				 * Beaglebone...
+				 *
+				 * We move the omap built-in RTC to rtc1, so
+				 * that userspace defaults to using the DS1307.
+				 *
+				 * The omap RTC must remain enabled because it
+				 * is also used during the reboot process on the
+				 * BBB.
+				 */
+				rtc1 = "/ocp/rtc@44e3e000";
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&i2c1>;
+		__overlay__ {
+			status = "okay";
+
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			extrtc: ds1307@68 {
+				compatible = "maxim,ds1307";
+				reg = <0x68>; /* DS1307 has a fixed I2C addr */
+			};
+		};
+	};
+};
+```
+
+```
+$ ./install.sh
+```
+
+14. Totally remove all the config-pin stuff I did before
+```
+$ sudo systemctl disable config-pin
+$ sudo rm /etc/systemd/system/config-pin.service /etc/config-pin.conf
+```
+
+15. Load pin configs via uboot DTB loading
+/boot/uEnv.txt
+```
+uboot_overlay_addr0=/lib/firmware/BB-CAN0-00A0.dtbo
+uboot_overlay_addr1=/lib/firmware/BB-UART4-00A0.dtbo
+uboot_overlay_addr2=/lib/firmware/BB-I2C1-FAST-00A0.dtbo
+uboot_overlay_addr3=/lib/firmware/BB-I2C1-RTC-DS1307.dtbo
+```
+
+16. Install gpsd
+
+With a network connection, run:
+```
+$ sudo apt-get install -y gpsd
+```
+
+17. Configure gpsd
+```
+# Default settings for the gpsd init script and the hotplug wrapper.
+
+# Start the gpsd daemon automatically at boot time
+START_DAEMON="true"
+
+# Use USB hotplugging to add new USB devices automatically to the daemon
+USBAUTO="false"
+
+# Devices gpsd should collect to at boot time.
+# They need to be read/writeable, either by user gpsd or the group dialout.
+DEVICES="/dev/ttyO4 /dev/pps0"
+
+# Other options you want to pass to gpsd
+GPSD_OPTIONS="-n"
+```
+
+18. Setup PPS overlay
+
+/opt/source/bb.org-overlays/src/arm/BB-PPS-P8_07-00A0.dts
+```
+/*
+ * Copyright (C) 2019 John Ott <john@johnott.us>
+ *
+ * Virtual cape for PPS on pin P8.7
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
+/dts-v1/;
+/plugin/;
+
+#include <dt-bindings/board/am335x-bbw-bbb-base.h>
+#include <dt-bindings/pinctrl/am33xx.h>
+
+/ {
+	compatible = "ti,beaglebone", "ti,beaglebone-black", "ti,beaglebone-green";
+
+	/* identification */
+	part-number = "BB-PPS-P8_07";
+	version = "00A0";
+
+	/* state the resources this cape uses */
+	exclusive-use =
+		/* the pin header uses */
+		"P8.7",	/* pps gpio2_2 */
+		/* The hardware ip uses */
+		"gpio2_2";
+
+	/*
+	 * Free up the pins used by the cape from the pinmux helpers.
+	 */
+	fragment@0 {
+		target = <&ocp>;
+		__overlay__ {
+			P8_07_pinmux { status = "disabled"; };
+		};
+	};
+
+	fragment@1 {
+		target = <&am33xx_pinmux>;
+		__overlay__ {
+			pps_pins: pimux_pps_pins {
+				pinctrl-single,pins = <
+					BONE_P8_07 (PIN_INPUT | MUX_MODE7)
+				>;
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&ocp>;
+		__overlay__ {
+			pps {
+				compatible = "pps-gpio";
+				status = "okay";
+				pinctrl-names = "default";
+				pinctrl-0 = <&pps_pins>;
+
+				gpios = <&gpio2 2 0>;
+				assert-rising-edge;
+			};
+		};
+	};
+};
+```
+
+```
+$ ./install.sh
+```
+
+19. Load PPS via uboot DTB loading
+/boot/uEnv.txt
+```
+uboot_overlay_addr4=/lib/firmware/BB-PPS-P8_07-00A0.dtbo
+```
+
+20. Enable GSPD on boot
+```
+$ sudo systemctl enable gpsd
+# This is needed to force system to start gpsd even when no client is connected.
+$ sudo ln -s /lib/systemd/system/gpsd.service /etc/systemd/system/multi-user.target.wants/gpsd.service
+```
+
+21. Reboot
+```
+$ sudo reboot
+```
+
+22. Install chronyd
+```
+$ sudo apt-get install -y chrony
+```
+
+23. Configure chronyd to use gps as a reference
+
+/etc/chrony/chrony.conf
+```
+...
+
+# get NMEA data from gpsd over shared memory
+refclock SHM 0 offset 0.395 delay 0.2 refid NMEA noselect
+# get PPS data from pps-gpio, summarize every 16 seconds, prefer it
+refclock PPS /dev/pps0 refid PPS poll 4 prefer
+```
+
+24. Reboot again
+
+25. Make sure GPS works via netcat
+
+This should result in a stream of JSON messages coming out with GPS data.
+```
+$ sudo apt-get install -y netcat
+$ echo '?WATCH={"enable":true,"json":true}' | nc localhost 2947
 ```

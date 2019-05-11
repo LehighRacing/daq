@@ -120,7 +120,7 @@ $ sudo mkdir /mnt/sdcard
 
 /etc/fstab add
 ```
-/dev/mmcblk0p1	/mnt/sdcard	auto	auto,rw,async,user,nofail	0	0
+/dev/mmcblk0p1	/mnt/sdcard	auto	auto,rw,sync,user,nofail	0	0
 ```
 
 11. Add I2C to the config-pin conf

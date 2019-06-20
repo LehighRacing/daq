@@ -1,1 +1,3 @@
 https://stackoverflow.com/questions/33549211/how-to-add-i2c-devices-on-the-beaglebone-black-using-device-tree-overlays
+
+https://github.com/derekmolloy/beaglebone
